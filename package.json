@@ -8,7 +8,10 @@
     "start": "node dist/app.js",
     "dev": "ts-node src/app.ts",
     "dev:watch": "nodemon --exec ts-node src/app.ts",
-    "build": "tsc"
+    "build": "tsc",
+    "typeorm": "npx typeorm-ts-node-commonjs",
+    "migration:generate": "npm run typeorm migration:generate src/migrations/$npm_config_name -- -d src/data-source.ts",
+    "migration:run": "npm run typeorm migration:run -- -d src/data-source.ts"
   },
   "keywords": [],
   "author": "",
