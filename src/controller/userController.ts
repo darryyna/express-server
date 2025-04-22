@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { UserService } from '../service/userService';
+import { UserService, UpdateUserDto, RegisterUserDto } from '../service/userService';
+import { UserRole} from "../model/User";
 
 export class UserController {
     private readonly userService: UserService;
@@ -20,6 +21,10 @@ export class UserController {
     getUserById = async (req: Request, res: Response, next: NextFunction) => {
         try {
             const id = parseInt(req.params.id);
+            if (isNaN(id)) {
+                return res.status(400).json({ message: 'Invalid user ID' });
+            }
+
             const user = await this.userService.getUserById(id);
 
             if (!user) {
@@ -34,15 +39,33 @@ export class UserController {
 
     createUser = async (req: Request, res: Response, next: NextFunction) => {
         try {
-            const { firstName, lastName, age } = req.body;
+            const userData: RegisterUserDto = req.body;
+            const { email, firstName, lastName, age, password, role } = userData;
 
-            if (!firstName || !lastName || age === undefined) {
-                return res.status(400).json({ message: 'All fields are required' });
+            if (!email || !firstName || !lastName || age === undefined || !password) {
+                return res.status(400).json({ message: 'All required fields (email, firstName, lastName, age, password) must be provided for user creation' });
             }
 
-            const newUser = await this.userService.createUser({ firstName, lastName, age });
-            return res.status(201).json(newUser);
-        } catch (error) {
+            if (role && !Object.values(UserRole).includes(role)) {
+                return res.status(400).json({ message: `Invalid role provided. Accepted roles are ${Object.values(UserRole).join(', ')}.` });
+            }
+
+            const roleToAssign = role ?? UserRole.User;
+
+            const newUser = await this.userService.registerUser({
+                email, firstName, lastName, age, password, role: roleToAssign
+            });
+
+
+            const userResponse = { ...newUser };
+            delete (userResponse as any).password;
+
+
+            return res.status(201).json(userResponse);
+        } catch (error: any) {
+            if (error.message === 'User with this email already exists') {
+                return res.status(409).json({ message: error.message });
+            }
             next(error);
         }
     };
@@ -50,9 +73,18 @@ export class UserController {
     updateUser = async (req: Request, res: Response, next: NextFunction) => {
         try {
             const id = parseInt(req.params.id);
-            const { firstName, lastName, age } = req.body;
+            if (isNaN(id)) {
+                return res.status(400).json({ message: 'Invalid user ID' });
+            }
 
-            const updatedUser = await this.userService.updateUser(id, { firstName, lastName, age });
+            const userData: UpdateUserDto = req.body;
+
+            if (userData.role && !Object.values(UserRole).includes(userData.role)) {
+                return res.status(400).json({ message: `Invalid role value. Accepted roles are ${Object.values(UserRole).join(', ')}.` });
+            }
+
+
+            const updatedUser = await this.userService.updateUser(id, userData);
 
             if (!updatedUser) {
                 return res.status(404).json({ message: 'User not found' });
@@ -67,6 +99,10 @@ export class UserController {
     deleteUser = async (req: Request, res: Response, next: NextFunction) => {
         try {
             const id = parseInt(req.params.id);
+            if (isNaN(id)) {
+                return res.status(400).json({ message: 'Invalid user ID' });
+            }
+
             const deleted = await this.userService.deleteUser(id);
 
             if (!deleted) {
@@ -83,9 +119,22 @@ export class UserController {
         try {
             const firstName = req.query['firstName'] as string | undefined;
             const lastName = req.query['lastName'] as string | undefined;
-            const age = req.query['age'] ? parseInt(req.query['age'] as string, 10) : undefined;
+            const ageQuery = req.query['age'] as string | undefined;
+            const age = ageQuery ? parseInt(ageQuery, 10) : undefined;
+            if (ageQuery !== undefined && isNaN(age as number)) {
+                return res.status(400).json({ message: 'Invalid age format' });
+            }
 
-            const users = await this.userService.findUsersByQuery({ firstName, lastName, age });
+            const email = req.query['email'] as string | undefined;
+            const roleQuery = req.query['role'] as string | undefined;
+
+            const role = roleQuery && Object.values(UserRole).includes(roleQuery as UserRole) ? roleQuery as UserRole : undefined;
+            if (roleQuery !== undefined && role === undefined) {
+                return res.status(400).json({ message: `Invalid role value. Accepted roles are ${Object.values(UserRole).join(', ')}.` });
+            }
+
+
+            const users = await this.userService.findUsersByQuery({ firstName, lastName, age, email, role });
 
             return res.status(200).json(users);
         } catch (error) {
