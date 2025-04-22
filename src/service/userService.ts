@@ -1,4 +1,4 @@
-import { Repository } from 'typeorm';
+import {Raw, Repository} from 'typeorm';
 import { User } from '../model/User';
 import { AppDataSource } from '../data-source';
 
@@ -30,5 +30,26 @@ export class UserService {
     async deleteUser(id: number): Promise<boolean> {
         const result = await this.userRepository.delete(id);
         return result.affected ? result.affected > 0 : false;
+    }
+
+    async findUsersByQuery(query: {
+        firstName?: string;
+        lastName?: string;
+        age?: number;
+    }): Promise<User[]> {
+        const { firstName, lastName, age } = query;
+
+        return this.userRepository.find({
+            where: {
+                ...(firstName && {
+                    firstName: Raw(alias => `${alias} ILIKE :value`, { value: `%${firstName}%` }),
+                }),
+                ...(lastName && {
+                    lastName: Raw(alias => `${alias} ILIKE :value`, { value: `%${lastName}%` }),
+                }),
+                ...(age && { age }),
+            },
+            order: { id: 'ASC' },
+        });
     }
 }

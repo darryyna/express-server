@@ -78,4 +78,18 @@ export class UserController {
             next(error);
         }
     };
+
+    findUsers = async (req: Request, res: Response, next: NextFunction) => {
+        try {
+            const firstName = req.query['firstName'] as string | undefined;
+            const lastName = req.query['lastName'] as string | undefined;
+            const age = req.query['age'] ? parseInt(req.query['age'] as string, 10) : undefined;
+
+            const users = await this.userService.findUsersByQuery({ firstName, lastName, age });
+
+            return res.status(200).json(users);
+        } catch (error) {
+            next(error);
+        }
+    };
 }
