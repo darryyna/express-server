@@ -60,19 +60,22 @@ export class AuthController {
             const { email, password } = req.body;
 
             if (!email || !password) {
-                return res.status(400).json({ message: 'Email and password are required' });
+                res.cookie('loginError', 'Email and password are required', { httpOnly: true });
+                return res.redirect('/login');
             }
 
             const user = await this.userService.findUserByEmail(email);
 
             if (!user) {
-                return res.status(401).json({ message: 'Invalid credentials' });
+                res.cookie('loginError', 'Invalid credentials', { httpOnly: true });
+                return res.redirect('/login');
             }
 
             const passwordMatch = await bcrypt.compare(password, user.password);
 
             if (!passwordMatch) {
-                return res.status(401).json({ message: 'Invalid credentials' });
+                res.cookie('loginError', 'Invalid credentials', { httpOnly: true });
+                return res.redirect('/login');
             }
 
             const token = jwt.sign(
@@ -81,10 +84,13 @@ export class AuthController {
                 { expiresIn: '1h' } // Час життя токена
             );
 
-            return res.status(200).json({ token });
+            res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
+            return res.redirect('/profile');
 
 
         } catch (error) {
+            console.error('Login error:', error);
+            res.cookie('loginError', 'An error occurred during login.', { httpOnly: true });
             next(error);
         }
     };
