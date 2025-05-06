@@ -17,4 +17,5 @@ router.put('/:id', verifyToken, authorizeRoles(UserRole.Admin), userController.u
 
 router.delete('/:id', verifyToken, authorizeRoles(UserRole.Admin), userController.deleteUser);
 
+
 export default router;

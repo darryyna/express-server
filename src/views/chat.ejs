@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Real-time Chat</title>
+    <style>
+        body { font-family: sans-serif; display: flex; height: 100vh; margin: 0; }
+        #userList { width: 300px; border-right: 1px solid #ccc; overflow-y: auto; flex-shrink: 0; }
+        #userList h3 { padding: 10px; margin: 0; border-bottom: 1px solid #ccc; }
+        #userList .user-item { padding: 10px; cursor: pointer; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;}
+        #userList .user-item:hover { background-color: #f0f0f0; }
+        #userList .user-item.selected { background-color: #d0d0ff; }
+        #userList .user-item.has-new-message { background-color: #ffffe0; }
+        #userList .status-indicator { font-size: 0.8em; color: gray; margin-left: 10px; }
+        .new-message-indicator {
+            display: inline-block;
+            background-color: red;
+            color: white;
+            font-size: 0.7em;
+            padding: 2px 5px;
+            border-radius: 10px;
+            margin-left: 5px;
+        }
+
+        #chatArea { flex-grow: 1; display: flex; flex-direction: column; }
+        #chatTitle { padding: 10px; border-bottom: 1px solid #ccc; font-weight: bold; flex-shrink: 0; }
+        #messages { flex-grow: 1; overflow-y: auto; padding: 10px; border-bottom: 1px solid #ccc; }
+        #messages div { margin-bottom: 8px; }
+        #messages .my-message { text-align: right; color: blue; }
+        #messages .other-message { text-align: left; color: green; }
+        #messages .system-message { text-align: center; color: gray; font-style: italic; }
+        #inputArea { display: flex; padding: 10px; flex-shrink: 0; }
+        #messageInput { flex-grow: 1; padding: 8px; margin-right: 10px; }
+        #sendButton { padding: 8px 15px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div id="userList">
+    <div class="user-item" data-user-id="public">General Chat</div>
+    <% allUsers.forEach(user => { %>
+        <% if (user.id !== loggedInUser.id) { %>
+            <div class="user-item" data-user-id="<%= user.id %>">
+                <div><%= user.firstName %> <%= user.lastName %> (<%= user.email %>)</div>
+                <span class="status-indicator" id="status_<%= user.id %>">Offline</span>
+                <span class="new-message-indicator" id="new_message_<%= user.id %>" style="display: none;">New</span>
+            </div>
+        <% } %>
+    <% }); %>
+</div>
+
+<div id="chatArea">
+    <div id="chatTitle"></div>
+    <div id="messages">
+    </div>
+    <div id="inputArea">
+        <input type="text" id="messageInput" placeholder="Enter message...">
+        <button id="sendButton">Send</button>
+    </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+    const loggedInUser = <%- JSON.stringify(loggedInUser) %>;
+    const currentUserId = loggedInUser.id;
+    const currentUserEmail = loggedInUser.email;
+    const allUsers = <%- JSON.stringify(allUsers) %>;
+    const jwtToken = <%- JSON.stringify(jwtToken) %>;
+
+    let selectedRecipientId = 'public';
+    let onlineUsers = {};
+    let unreadMessages = {};
+
+    const userListDiv = document.getElementById('userList');
+    const messagesDiv = document.getElementById('messages');
+    const messageInput = document.getElementById('messageInput');
+    const sendButton = document.getElementById('sendButton');
+    const chatTitleDiv = document.getElementById('chatTitle');
+    const onlineUsersCountSpan = document.getElementById('onlineUsersCount');
+
+
+    const socket = io({
+        auth: {
+            token: jwtToken
+        }
+    });
+
+    socket.on('connect', () => {
+        console.log('Connected to Socket.IO server');
+    });
+
+    socket.on('disconnect', () => {
+        console.log('Disconnected from Socket.IO server');
+        updateUserStatus(currentUserId, false);
+    });
+
+    socket.on('connect_error', (err) => {
+        console.error('Socket.IO connection error:', err.message);
+        appendMessage({ content: `Connection error: ${err.message}`, isSystem: true });
+    });
+
+    socket.on('message', (msg) => {
+        if (selectedRecipientId === 'public') {
+            appendMessage(msg, false);
+        }
+    });
+
+    socket.on('private message', (msg) => {
+        console.log('Received private message:', msg);
+        const conversationPartnerId = msg.sender.id === currentUserId ? msg.recipient.id : msg.sender.id;
+
+        if (selectedRecipientId !== conversationPartnerId) {
+            console.log(`New private message for user ID ${conversationPartnerId}`);
+            unreadMessages[conversationPartnerId] = (unreadMessages[conversationPartnerId] || 0) + 1;
+            updateNewMessageIndicator(conversationPartnerId);
+        }
+
+        if (selectedRecipientId === conversationPartnerId) {
+            appendMessage(msg, true);
+        }
+    });
+
+
+    socket.on('public message history', (history) => {
+        console.log('Received public message history');
+        if (selectedRecipientId === 'public') {
+            clearMessages();
+            history.forEach(msg => appendMessage(msg, false));
+        }
+    });
+
+    socket.on('private message history', (history) => {
+        console.log('Received private message history');
+        const conversationPartnerId = history.length > 0 ? (history[0].sender.id === currentUserId ? history[0].recipient.id : history[0].sender.id) : selectedRecipientId;
+        markNewMessage(conversationPartnerId, false);
+        unreadMessages[conversationPartnerId] = 0;
+        updateNewMessageIndicator(conversationPartnerId);
+
+        clearMessages();
+        history.forEach(msg => appendMessage(msg, true));
+    });
+
+
+    socket.on('user connected', (user) => {
+        console.log(`User ${user.email} connected`);
+        updateUserStatus(user.userId, true);
+    });
+
+    socket.on('user disconnected', (user) => {
+        console.log(`User ${user.email} disconnected`);
+        updateUserStatus(user.userId, false);
+    });
+
+    socket.on('online users list', (onlineUserIds) => {
+        console.log('Received online users list:', onlineUserIds);
+        onlineUsers = {};
+        onlineUserIds.forEach(userId => {
+            if (userId !== currentUserId) {
+                onlineUsers[userId] = true;
+            }
+        });
+        allUsers.forEach(user => {
+            updateUserStatus(user.id, onlineUsers[user.id] === true);
+        });
+        const count = Object.keys(onlineUsers).length;
+        onlineUsersCountSpan.textContent = count;
+    });
+
+
+    socket.on('error', (errorMessage) => {
+        console.error('Server-side error:', errorMessage);
+        appendMessage({ content: `Server error: ${errorMessage}`, isSystem: true });
+    });
+
+    function appendMessage(msg, isPrivate) {
+        const msgElement = document.createElement('div');
+        const senderName = msg.sender?.firstName || msg.sender?.email || 'Unknown';
+        const timestamp = new Date(msg.timestamp).toLocaleTimeString();
+
+        const conversationPartnerId = isPrivate ? (msg.sender.id === currentUserId ? msg.recipient.id : msg.sender.id) : 'public';
+
+        if (selectedRecipientId !== conversationPartnerId) {
+            return;
+        }
+
+        if (msg.isSystem) {
+            msgElement.classList.add('system-message');
+            msgElement.textContent = msg.content;
+        } else {
+            if (msg.sender && msg.sender.id === currentUserId) {
+                msgElement.classList.add('my-message');
+                msgElement.innerHTML = `<strong>You:</strong> ${msg.content} <small>${timestamp}</small>`;
+            } else {
+                msgElement.classList.add('other-message');
+                const displaySenderName = isPrivate ? (msg.sender?.firstName + ' ' + msg.sender?.lastName || msg.sender?.email || 'Unknown') : senderName;
+                msgElement.innerHTML = `<strong>${displaySenderName}:</strong> ${msg.content} <small>${timestamp}</small>`;
+
+            }
+        }
+
+
+        messagesDiv.appendChild(msgElement);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+
+    function clearMessages() {
+        messagesDiv.innerHTML = '';
+    }
+
+    function updateChatTitle() {
+        if (selectedRecipientId === 'public') {
+            chatTitleDiv.textContent = 'General Chat';
+        } else {
+            const recipientUser = allUsers.find(user => user.id === selectedRecipientId);
+            chatTitleDiv.textContent = `Private Chat with ${recipientUser ? (recipientUser.firstName + ' ' + recipientUser.lastName) : 'Unknown User'}`;
+        }
+    }
+
+    function updateUserStatus(userId, isOnline) {
+        const statusSpan = document.getElementById(`status_${userId}`);
+        if (statusSpan) {
+            statusSpan.textContent = isOnline ? 'Online' : 'Offline';
+            statusSpan.style.color = isOnline ? 'green' : 'gray';
+        }
+        const count = Object.keys(onlineUsers).length;
+        onlineUsersCountSpan.textContent = count;
+    }
+
+    function markNewMessage(userId, show) {
+        const indicatorSpan = document.getElementById(`new_message_${userId}`);
+        const userItemDiv = document.querySelector(`.user-item[data-user-id="${userId}"]`);
+
+        if (indicatorSpan) {
+            indicatorSpan.style.display = show ? 'inline' : 'none';
+        }
+        if (userItemDiv) {
+            if (show) {
+                userItemDiv.classList.add('has-new-message');
+            } else {
+                userItemDiv.classList.remove('has-new-message');
+            }
+        }
+    }
+
+    function updateNewMessageIndicator(userId) {
+        const indicatorSpan = document.getElementById(`new_message_${userId}`);
+        const count = unreadMessages[userId] || 0;
+        if (indicatorSpan) {
+            if (count > 0) {
+                indicatorSpan.textContent = count > 1 ? `${count} New` : 'New';
+                indicatorSpan.style.display = 'inline';
+            } else {
+                indicatorSpan.style.display = 'none';
+            }
+        }
+        const userItemDiv = document.querySelector(`.user-item[data-user-id="${userId}"]`);
+        if (userItemDiv) {
+            if (count > 0) {
+                userItemDiv.classList.add('has-new-message');
+            } else {
+                userItemDiv.classList.remove('has-new-message');
+            }
+        }
+    }
+
+
+    sendButton.addEventListener('click', () => {
+        sendMessage();
+    });
+
+    messageInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            sendMessage();
+        }
+    });
+
+    function sendMessage() {
+        const content = messageInput.value.trim();
+        if (content) {
+            if (selectedRecipientId === 'public') {
+                socket.emit('message', { content: content });
+            } else {
+                markNewMessage(selectedRecipientId, false);
+                unreadMessages[selectedRecipientId] = 0;
+                updateNewMessageIndicator(selectedRecipientId);
+
+                socket.emit('private message', { recipientId: selectedRecipientId, content: content });
+            }
+            messageInput.value = '';
+        }
+    }
+
+    userListDiv.addEventListener('click', (event) => {
+        const target = event.target.closest('.user-item');
+        if (target) {
+            const userId = target.dataset.userId;
+            if (userId !== selectedRecipientId) {
+                const prevSelected = userListDiv.querySelector('.user-item.selected');
+                if (prevSelected) {
+                    prevSelected.classList.remove('selected');
+                }
+                target.classList.add('selected');
+
+                selectedRecipientId = userId === 'public' ? 'public' : parseInt(userId, 10);
+
+                updateChatTitle();
+
+                if (selectedRecipientId !== 'public') {
+                    markNewMessage(selectedRecipientId, false);
+                    unreadMessages[selectedRecipientId] = 0;
+                    updateNewMessageIndicator(selectedRecipientId);
+                }
+
+
+                clearMessages();
+
+                if (selectedRecipientId === 'public') {
+                } else {
+                    socket.emit('get private message history', { userId1: currentUserId, userId2: selectedRecipientId });
+                }
+            }
+        }
+    });
+
+    const publicChatButton = userListDiv.querySelector('.user-item[data-user-id="public"]');
+    if(publicChatButton) {
+        publicChatButton.classList.add('selected');
+    }
+    updateChatTitle();
+
+    socket.on('system message', (msg) => {
+        appendMessage({ content: msg, isSystem: true });
+    });
+</script>
+</body>
+</html>
