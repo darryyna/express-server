@@ -226,6 +226,17 @@ io.on('connection', async (socket: AuthenticatedSocket) => {
         console.error(`Socket error for user ${user?.email || 'unknown'} (Socket ID: ${socket.id}):`, err.message);
         socket.emit('server error', 'На сервері сталася помилка, спробуйте пізніше.');
     });
+
+    socket.on('get public message history', async () => {
+        console.log(`User ${user.email} requesting public chat history.`);
+        try {
+            const history = await messageService.getPublicMessages();
+            socket.emit('public message history', history);
+        } catch (error) {
+            console.error('Error fetching public message history on request:', error);
+            socket.emit('error', 'Failed to load public message history.');
+        }
+    });
 });
 
 

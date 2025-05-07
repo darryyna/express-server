@@ -81,7 +81,7 @@ export class AuthController {
             const token = jwt.sign(
                 { id: user.id, email: user.email, role: user.role },
                 this.jwtSecret,
-                { expiresIn: '1h' } // Час життя токена
+                { expiresIn: '48h' } // Час життя токена
             );
 
             res.cookie('token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });

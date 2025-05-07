@@ -309,14 +309,11 @@
                     markNewMessage(selectedRecipientId, false);
                     unreadMessages[selectedRecipientId] = 0;
                     updateNewMessageIndicator(selectedRecipientId);
-                }
-
-
-                clearMessages();
-
-                if (selectedRecipientId === 'public') {
-                } else {
+                    clearMessages();
                     socket.emit('get private message history', { userId1: currentUserId, userId2: selectedRecipientId });
+                } else {
+                    clearMessages();
+                    socket.emit('get public message history');
                 }
             }
         }
